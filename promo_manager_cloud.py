@@ -4,6 +4,7 @@ import json
 import random
 import logging
 import time
+import re
 import requests
 import yt_dlp
 from dotenv import load_dotenv
@@ -161,8 +162,15 @@ def post_to_hatena(title, content):
         logging.error(f"Hatena error: {e}")
         return False
 
+def is_strict_account_match(text, target_handle):
+    """Strictly checks that the handle appears as an exact handle with negative lookahead.
+    Prevents @ToriShiraCh from matching @ToriShiraChanne."""
+    clean = target_handle.strip().lower().replace("@", "")
+    pattern = rf"@{clean}(?![a-zA-Z0-9_])"
+    return bool(re.search(pattern, text.lower()))
+
 def switch_x_account(page, target_handle):
-    """Switches X account and strictly verifies that the active account matches target_handle."""
+    """Switches X account and strictly verifies that the active account exactly matches target_handle."""
     clean_target = target_handle.strip().lower().replace("@", "")
     try:
         page.set_viewport_size({"width": 1600, "height": 900})
@@ -172,28 +180,39 @@ def switch_x_account(page, target_handle):
         switcher = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
         if switcher.count():
             cur_text = switcher.inner_text().lower()
-            if clean_target in cur_text:
+            if is_strict_account_match(cur_text, target_handle):
                 print(f"PASSED: Already logged into target X account (@{clean_target}).")
                 return True
                 
-            print(f"Switching account from current to @{clean_target}...")
+            print(f"Current active X account is NOT @{clean_target}. Switching account...")
             switcher.click(force=True)
             time.sleep(2)
             
-            item = page.locator(f"#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], text=@{clean_target}").filter(has_text=clean_target).first
-            if item.count():
-                item.click(force=True)
-                time.sleep(5)
+            # Find the exact row in menu (excluding other accounts like torishirachanne when looking for torishirach)
+            rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a").all()
+            target_item = None
+            for r in rows:
+                try:
+                    if is_strict_account_match(r.inner_text(), target_handle):
+                        target_item = r
+                        break
+                except Exception:
+                    pass
+                    
+            if target_item:
+                print(f"Clicking exact menu item for @{clean_target}...")
+                target_item.click(force=True)
+                time.sleep(6)
                 
-                # STRICT RE-VERIFY:
+                # STRICT RE-VERIFY AFTER SWITCH:
                 page.goto("https://x.com/home", wait_until="domcontentloaded")
                 time.sleep(3)
                 sw_after = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
-                if sw_after.count() and clean_target in sw_after.inner_text().lower():
-                    print(f"Successfully switched and verified active account is @{clean_target}!")
+                if sw_after.count() and is_strict_account_match(sw_after.inner_text(), target_handle):
+                    print(f"🎉 Successfully switched and strictly verified active account is @{clean_target}!")
                     return True
                     
-        print(f"[STRICT CHECK FAILED] Could not activate @{clean_target}. Active account mismatch.")
+        print(f"⛔ [STRICT CHECK FAILED] Active account is NOT @{clean_target}. Aborting to prevent wrong-account posting.")
         return False
     except Exception as e:
         logging.error(f"X switch error: {e}")
@@ -203,7 +222,7 @@ def post_to_x(page, text, target_handle):
     try:
         # STRICT PROTECTION: Never post if account does not strictly match target_handle
         if not switch_x_account(page, target_handle):
-            print(f"⛔ [STRICT ABORT] Aborting X post! Refusing to post because active account is NOT {target_handle}.")
+            print(f"⛔ [STRICT ABORT] Refusing to post because active account is NOT {target_handle}. Skipping post.")
             return False
             
         compose_btn = page.locator("[data-testid='SideNav_NewTweet_Button'], a[href='/compose/post']").first
@@ -280,7 +299,7 @@ def run_cloud_job():
             
         x_foreign_text = llm_client.generate_x_post(trans_title, collab_video['url'], lang['name'], is_collab=True)
         
-        # 1. Hatena Blog
+        # 1. Hatena Blog (12 foreign languages)
         embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{collab_video["id"]}" frameborder="0" allowfullscreen></iframe>'
         hatena_title = f"{trans_title} (AI Analysis) - Tori-Shira TT Lab"
         hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{collab_video['url']}'>Watch on YouTube</a></p>"
@@ -295,7 +314,7 @@ def run_cloud_job():
                     browser = p.chromium.launch(headless=True, channel="chrome", args=["--no-sandbox"])
                 context = browser.new_context(storage_state=AUTH_FILE)
                 
-                # 2. X (@ToriShiraCh - Foreign language only, STRICT ABORT IF NOT @ToriShiraCh)
+                # 2. X (@ToriShiraCh - 12 Foreign Languages ONLY, STRICT ABORT IF NOT @ToriShiraCh)
                 p1 = context.new_page()
                 post_to_x(p1, x_foreign_text, target_handle="@ToriShiraCh")
                 p1.close()
@@ -306,7 +325,7 @@ def run_cloud_job():
                 post_to_yt_community(p2, "https://www.youtube.com/@Tori-ShiraTTLab/posts", yt_text)
                 p2.close()
                 
-                # 4. Japanese Main Video/Playlist (@ToriShiraChanne - Japanese ONLY)
+                # 4. Japanese Main Video/Playlist (@ToriShiraChanne - Japanese ONLY, STRICT ABORT IF NOT @ToriShiraChanne)
                 main_item = fetch_main_items(history=state.get("history", []))
                 if main_item:
                     is_pl = main_item.get('is_playlist', False)
