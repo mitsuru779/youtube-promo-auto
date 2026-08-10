@@ -1,0 +1,82 @@
+name: Automated Multi-Language Dubbing & Upload Pipeline
+
+on:
+  schedule:
+    # Runs every 6 hours automatically (4 times per day)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Number of videos to process in this run'
+        required: false
+        default: '1'
+
+jobs:
+  dub_and_upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install System Dependencies (FFmpeg)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install edge-tts deep-translator pydub yt-dlp playwright youtube-transcript-api
+          playwright install --with-deps chromium
+
+      - name: Restore Session Cookies
+        run: |
+          echo "${{ secrets.YT_STUDIO_COOKIES }}" > storage_state.json
+
+      - name: Execute Batch Dubbing & Upload
+        run: |
+          python -c "
+          import json, os, sys
+          from manage_dubbing_queue import get_next_unprocessed_batch, mark_completed
+          from multi_lang_dubber import process_video_dubbing
+          from studio_audio_uploader import upload_audio_tracks
+
+          batch = get_next_unprocessed_batch(1)
+          if not batch:
+              print('All videos and languages are completed!')
+              sys.exit(0)
+
+          for video_id, missing_langs in batch:
+              print(f'Processing Video: {video_id} for languages: {missing_langs}')
+              generated_files = process_video_dubbing(video_id, missing_langs)
+              
+              if generated_files and os.path.exists('storage_state.json') and os.path.getsize('storage_state.json') > 10:
+                  success = upload_audio_tracks(video_id, generated_files, storage_state_path='storage_state.json')
+                  if success:
+                      for lang in generated_files.keys():
+                          mark_completed(video_id, lang)
+              else:
+                  print('Local audio generated. Skipping Studio upload until valid storage_state.json secret is configured.')
+                  for lang in generated_files.keys():
+                      mark_completed(video_id, lang)
+
+              # Cleanup generated mp3 files to conserve runner disk
+              for fpath in generated_files.values():
+                  if os.path.exists(fpath):
+                      os.remove(fpath)
+          "
+
+      - name: Commit and Push Updated Progress Matrix
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add dubbing_matrix.json
+          git commit -m "Auto-update dubbing matrix progress [skip ci]" || echo "No changes to commit"
+          git push
