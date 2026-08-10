@@ -4,15 +4,13 @@ import json
 import random
 import logging
 import time
-from datetime import datetime
-import yt_dlp
 import requests
+import yt_dlp
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 import llm_client
 
-# Fix console encoding
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding='utf-8')
 
@@ -23,9 +21,6 @@ logging.basicConfig(
 
 load_dotenv()
 
-# --- Configurations ---
-TTLAB_CHANNEL_URL = "https://www.youtube.com/@Tori-ShiraTTLab"
-TORISHIRA_CHANNEL_URL = "https://www.youtube.com/@ToriShiraChannel"
 STATE_FILE = "promo_state.json"
 AUTH_FILE = os.getenv("AUTH_STATE_FILE", "auth_state.json")
 
@@ -61,9 +56,7 @@ def save_state(state):
     except Exception as e:
         logging.error(f"Error saving state: {e}")
 
-# --- Data Fetching via yt-dlp ---
 def fetch_collab_videos():
-    """Fetches public videos from Tori-Shira TT Lab channel."""
     try:
         url = "https://www.youtube.com/@Tori-ShiraTTLab/videos"
         ydl_opts = {'extract_flat': True, 'quiet': True, 'playlistend': 30}
@@ -144,7 +137,6 @@ def fetch_main_items(history=[]):
         non_recent = all_items
     return random.choice(non_recent)
 
-# --- Tasks ---
 def post_to_hatena(title, content):
     try:
         hatena_id = os.getenv("HATENA_ID")
@@ -170,6 +162,7 @@ def post_to_hatena(title, content):
         return False
 
 def switch_x_account(page, target_handle):
+    """Switches X account and strictly verifies that the active account matches target_handle."""
     clean_target = target_handle.strip().lower().replace("@", "")
     try:
         page.set_viewport_size({"width": 1600, "height": 900})
@@ -177,19 +170,30 @@ def switch_x_account(page, target_handle):
         time.sleep(3)
         
         switcher = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
-        if switcher.count() and clean_target in switcher.inner_text().lower():
-            return True
-            
         if switcher.count():
+            cur_text = switcher.inner_text().lower()
+            if clean_target in cur_text:
+                print(f"PASSED: Already logged into target X account (@{clean_target}).")
+                return True
+                
+            print(f"Switching account from current to @{clean_target}...")
             switcher.click(force=True)
             time.sleep(2)
-            item = page.locator(f"#layers div[role='menu'], #layers [data-testid='AccountSwitcher_Account_Row']").filter(has_text=clean_target).first
-            if not item.count():
-                item = page.locator(f"text=@{clean_target}").first
+            
+            item = page.locator(f"#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], text=@{clean_target}").filter(has_text=clean_target).first
             if item.count():
                 item.click(force=True)
-                time.sleep(4)
-                return True
+                time.sleep(5)
+                
+                # STRICT RE-VERIFY:
+                page.goto("https://x.com/home", wait_until="domcontentloaded")
+                time.sleep(3)
+                sw_after = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
+                if sw_after.count() and clean_target in sw_after.inner_text().lower():
+                    print(f"Successfully switched and verified active account is @{clean_target}!")
+                    return True
+                    
+        print(f"[STRICT CHECK FAILED] Could not activate @{clean_target}. Active account mismatch.")
         return False
     except Exception as e:
         logging.error(f"X switch error: {e}")
@@ -197,11 +201,16 @@ def switch_x_account(page, target_handle):
 
 def post_to_x(page, text, target_handle):
     try:
+        # STRICT PROTECTION: Never post if account does not strictly match target_handle
         if not switch_x_account(page, target_handle):
-            print(f"[ABORT] Cannot switch to {target_handle}")
+            print(f"⛔ [STRICT ABORT] Aborting X post! Refusing to post because active account is NOT {target_handle}.")
             return False
             
-        page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=45000)
+        compose_btn = page.locator("[data-testid='SideNav_NewTweet_Button'], a[href='/compose/post']").first
+        if compose_btn.count():
+            compose_btn.click()
+        else:
+            page.goto("https://x.com/compose/post", wait_until="domcontentloaded", timeout=30000)
         time.sleep(3)
         
         box = page.locator("div[role='dialog'] div[role='textbox'], div[role='textbox']").first
@@ -248,7 +257,6 @@ def post_to_yt_community(page, channel_url, text):
         logging.error(f"YouTube Community error: {e}")
         return False
 
-# --- Cloud Runner ---
 def run_cloud_job():
     print("=== Launching Promo Job on Cloud ===")
     state = load_state()
@@ -272,13 +280,13 @@ def run_cloud_job():
             
         x_foreign_text = llm_client.generate_x_post(trans_title, collab_video['url'], lang['name'], is_collab=True)
         
-        # 1. Hatena
+        # 1. Hatena Blog
         embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{collab_video["id"]}" frameborder="0" allowfullscreen></iframe>'
         hatena_title = f"{trans_title} (AI Analysis) - Tori-Shira TT Lab"
         hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{collab_video['url']}'>Watch on YouTube</a></p>"
         post_to_hatena(hatena_title, hatena_content)
         
-        # Launch Headless Playwright using saved auth_state.json
+        # Launch Headless Playwright
         if os.path.exists(AUTH_FILE):
             with sync_playwright() as p:
                 try:
@@ -287,7 +295,7 @@ def run_cloud_job():
                     browser = p.chromium.launch(headless=True, channel="chrome", args=["--no-sandbox"])
                 context = browser.new_context(storage_state=AUTH_FILE)
                 
-                # 2. X (@ToriShiraCh - Foreign language only)
+                # 2. X (@ToriShiraCh - Foreign language only, STRICT ABORT IF NOT @ToriShiraCh)
                 p1 = context.new_page()
                 post_to_x(p1, x_foreign_text, target_handle="@ToriShiraCh")
                 p1.close()
