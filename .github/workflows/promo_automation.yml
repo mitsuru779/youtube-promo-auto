@@ -8,7 +8,7 @@ on:
 
 jobs:
   promote:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
 
@@ -27,7 +27,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk fonts-ipafont-gothic
 
-      - name: Install Python Dependencies
+      - name: Install Python Dependencies & Browsers
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
@@ -40,8 +40,6 @@ jobs:
           if [ -n "$AUTH_STATE_BASE64" ]; then
             echo "$AUTH_STATE_BASE64" | base64 --decode > auth_state.json
             echo "Successfully restored auth_state.json from secret."
-          else
-            echo "Warning: AUTH_STATE_BASE64 secret not found, using repository auth_state.json if available."
           fi
 
       - name: Run Promo Automation
