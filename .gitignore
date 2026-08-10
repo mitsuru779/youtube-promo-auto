@@ -1,0 +1,15 @@
+.env
+chrome_profile/
+auth_state.json
+github_secrets_info.txt
+*.log
+*.mp3
+*.vtt
+*.png
+*.jpg
+*.zip
+.venv/
+__pycache__/
+output_audio*/
+temp_audio*/
+real_user_profile/
