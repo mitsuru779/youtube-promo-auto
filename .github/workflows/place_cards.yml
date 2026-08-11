@@ -24,6 +24,7 @@ jobs:
           npx playwright install chromium --with-deps
 
       - name: Run Auto Card Placer Script
+        continue-on-error: true
         run: |
           node scratch/github_actions_card_placer.mjs
 
