@@ -69,21 +69,41 @@ async function main() {
     console.log(`\n📹 Processing [${videoId}] "${videoEntry.title?.substring(0, 40)}" (${cards.length} cards planned)`);
 
     try {
-      // 1. Navigate to video edit page
+      // Navigate to video details via list or direct studio edit
       await page.goto(`https://studio.youtube.com/video/${videoId}/edit`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(6000);
 
-      // 2. Click Cards edit pencil in right sidepanel
-      const cardsLink = page.locator('#info-cards-editor-link, [id*="cards"]').first();
-      if (await cardsLink.isVisible({ timeout: 5000 })) {
-        await cardsLink.click();
-      } else {
-        await page.evaluate(() => { window.scrollTo(0, 800); });
-        await page.waitForTimeout(2000);
-        await page.click('#info-cards-editor-link');
+      // Check if permission toast/error appeared, if so refresh session via channel page
+      const hasAuthError = await page.evaluate(() => {
+        const toasts = Array.from(document.querySelectorAll('tp-yt-paper-toast, ytcp-toast, div'));
+        return toasts.some(t => (t.innerText || '').includes('権限がありません'));
+      });
+
+      if (hasAuthError) {
+        console.log('  ⚠️ Auth error detected in cloud, refreshing channel session...');
+        await page.goto('https://www.youtube.com/@ToriShiraChannel', { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(4000);
+        await page.goto(`https://studio.youtube.com/video/${videoId}/edit`, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(6000);
       }
 
-      await page.waitForTimeout(4000);
+      // Scroll sidepanel down
+      await page.evaluate(() => {
+        const sidepanel = document.querySelector('ytcp-video-metadata-editor-sidepanel') || document.querySelector('#right-col');
+        if (sidepanel) sidepanel.scrollTop = 1200;
+        window.scrollTo(0, 1000);
+      });
+      await page.waitForTimeout(2000);
+
+      // Click Cards edit pencil in right sidepanel
+      const cardsPencil = page.locator('#info-cards-editor-link, [id*="cards"]').first();
+      if (await cardsPencil.isVisible({ timeout: 5000 })) {
+        await cardsPencil.click();
+        await page.waitForTimeout(4000);
+      } else {
+        console.log('  ⚠️ Cards pencil not visible, skipping video...');
+        continue;
+      }
 
       let cardsAdded = 0;
 
@@ -97,7 +117,7 @@ async function main() {
           await page.waitForTimeout(3000);
 
           // Type search title inside picker
-          const targetTitle = (card.targetTitle || '').replace(/【.*?】/g, '').substring(0, 6);
+          const targetTitle = (card.targetTitle || '').replace(/【.*?】/g, '').trim().substring(0, 6);
           const searchInput = page.locator('#search-yours, input[placeholder*="検索"]').first();
           if (await searchInput.isVisible({ timeout: 3000 })) {
             await searchInput.fill(targetTitle);
