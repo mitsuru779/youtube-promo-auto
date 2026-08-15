@@ -83,6 +83,20 @@ def fetch_collab_videos():
                         'url': f"https://www.youtube.com/watch?v={v_id}",
                         'description': t
                     })
+        
+        # Ensure target featured videos are always included in rotation
+        target_videos = [
+            {
+                'id': '_lAcFW-besQ',
+                'title': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)',
+                'url': 'https://www.youtube.com/watch?v=_lAcFW-besQ',
+                'description': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)'
+            }
+        ]
+        for tv in target_videos:
+            if not any(v['id'] == tv['id'] for v in videos):
+                videos.append(tv)
+
         return videos
     except Exception as e:
         logging.error(f"Error fetching collab videos: {e}")
