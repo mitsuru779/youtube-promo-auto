@@ -137,8 +137,30 @@ def fetch_collab_videos_from_studio(page, history=[]):
         for tv in target_videos:
             if not any(v['id'] == tv['id'] for v in videos):
                 videos.append(tv)
+
+        # Also merge public videos from Main Channel (@ToriShiraChannel) excluding members-only
+        try:
+            url_main = "https://www.youtube.com/@ToriShiraChannel/videos"
+            ydl_opts = {'extract_flat': True, 'quiet': True, 'playlistend': 40}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                res = ydl.extract_info(url_main, download=False)
+                entries = res.get('entries', []) if res else []
+                for e in entries:
+                    t = e.get('title') or ""
+                    v_id = e.get('id') or ""
+                    if "メンバー限定" in t or "Members-only" in t:
+                        continue
+                    if v_id and t and not any(v['id'] == v_id for v in videos):
+                        videos.append({
+                            'id': v_id,
+                            'title': t,
+                            'url': f"https://www.youtube.com/watch?v={v_id}",
+                            'description': t
+                        })
+        except Exception as err:
+            print(f"Warning fetching main channel videos for multilingual pool: {err}")
             
-        print(f"Finished crawling. Total collaboration videos found: {len(videos)}")
+        print(f"Finished crawling. Total multilingual candidate videos found from BOTH channels: {len(videos)}")
         if not videos:
             return None
             

@@ -65,42 +65,77 @@ def has_japanese_kana(text):
     """Checks if text contains Japanese Hiragana or Katakana."""
     return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text))
 
-def fetch_collab_videos():
+def fetch_multilingual_target_videos():
+    """Fetches videos from BOTH channels for multi-lingual promotion:
+    1. Tori-Shira TT Lab (@Tori-ShiraTTLab/videos)
+    2. Tori-Shira Main Channel (@ToriShiraChannel/videos) - Excluding members-only
+    """
+    videos = []
+    seen_ids = set()
+    
+    # 1. Tori-Shira TT Lab Videos
     try:
-        url = "https://www.youtube.com/@Tori-ShiraTTLab/videos"
+        url_ttlab = "https://www.youtube.com/@Tori-ShiraTTLab/videos"
         ydl_opts = {'extract_flat': True, 'quiet': True, 'playlistend': 30}
-        videos = []
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            res = ydl.extract_info(url, download=False)
+            res = ydl.extract_info(url_ttlab, download=False)
             entries = res.get('entries', []) if res else []
             for e in entries:
                 t = e.get('title') or ""
                 v_id = e.get('id') or ""
-                if v_id and t:
+                if v_id and t and v_id not in seen_ids:
+                    seen_ids.add(v_id)
                     videos.append({
                         'id': v_id,
                         'title': t,
                         'url': f"https://www.youtube.com/watch?v={v_id}",
-                        'description': t
+                        'description': t,
+                        'source': 'TTLab'
                     })
-        
-        # Ensure target featured videos are always included in rotation
-        target_videos = [
-            {
-                'id': '_lAcFW-besQ',
-                'title': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)',
-                'url': 'https://www.youtube.com/watch?v=_lAcFW-besQ',
-                'description': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)'
-            }
-        ]
-        for tv in target_videos:
-            if not any(v['id'] == tv['id'] for v in videos):
-                videos.append(tv)
-
-        return videos
     except Exception as e:
-        logging.error(f"Error fetching collab videos: {e}")
-        return []
+        logging.warning(f"Warning fetching TTLab videos: {e}")
+
+    # 2. Main Channel Videos (@ToriShiraChannel/videos) - Excluding members-only
+    try:
+        url_main = "https://www.youtube.com/@ToriShiraChannel/videos"
+        ydl_opts = {'extract_flat': True, 'quiet': True, 'playlistend': 40}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            res = ydl.extract_info(url_main, download=False)
+            entries = res.get('entries', []) if res else []
+            for e in entries:
+                t = e.get('title') or ""
+                v_id = e.get('id') or ""
+                if "メンバー限定" in t or "Members-only" in t:
+                    continue
+                if v_id and t and v_id not in seen_ids:
+                    seen_ids.add(v_id)
+                    videos.append({
+                        'id': v_id,
+                        'title': t,
+                        'url': f"https://www.youtube.com/watch?v={v_id}",
+                        'description': t,
+                        'source': 'Main'
+                    })
+    except Exception as e:
+        logging.warning(f"Warning fetching Main Channel videos for multilingual target: {e}")
+
+    # 3. Explicitly featured target videos
+    target_videos = [
+        {
+            'id': '_lAcFW-besQ',
+            'title': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)',
+            'url': 'https://www.youtube.com/watch?v=_lAcFW-besQ',
+            'description': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)',
+            'source': 'Featured'
+        }
+    ]
+    for tv in target_videos:
+        if tv['id'] not in seen_ids:
+            seen_ids.add(tv['id'])
+            videos.append(tv)
+
+    print(f"Total multi-lingual candidate videos pool from BOTH channels: {len(videos)}")
+    return videos
 
 def fetch_published_playlists():
     playlists_url = "https://www.youtube.com/@ToriShiraChannel/playlists"
@@ -357,30 +392,31 @@ def run_cloud_job():
     lang = LANGUAGES[lang_index]
     print(f"Current Language: {lang['name']} ({lang['code']})")
     
-    # Task 1, 2, 3: Collab videos (12 foreign languages only)
-    collab_videos = fetch_collab_videos()
-    if collab_videos:
-        non_recent = [v for v in collab_videos if v['url'] not in state.get("history", [])]
-        collab_video = random.choice(non_recent if non_recent else collab_videos)
+    # Task 1, 2, 3: Multilingual promotion pool from BOTH channels (12 foreign languages only)
+    multilingual_videos = fetch_multilingual_target_videos()
+    if multilingual_videos:
+        non_recent = [v for v in multilingual_videos if v['url'] not in state.get("history", [])]
+        chosen_video = random.choice(non_recent if non_recent else multilingual_videos)
+        print(f"Selected video for Multilingual Promotion: {chosen_video['title']} [{chosen_video['source']}] ({chosen_video['url']})")
         
-        trans_title = llm_client.translate_title(collab_video['title'], lang['name']) or collab_video['title']
-        trans_desc = llm_client.translate_text(collab_video['description'], lang['name']) or collab_video['description']
+        trans_title = llm_client.translate_title(chosen_video['title'], lang['name']) or chosen_video['title']
+        trans_desc = llm_client.translate_text(chosen_video['description'], lang['name']) or chosen_video['description']
         
         # Check no Japanese kana in foreign post
         if has_japanese_kana(trans_title) or has_japanese_kana(trans_desc):
-            trans_title = llm_client.translate_title(collab_video['title'], "英語")
-            trans_desc = llm_client.translate_text(collab_video['description'], "英語")
+            trans_title = llm_client.translate_title(chosen_video['title'], "英語")
+            trans_desc = llm_client.translate_text(chosen_video['description'], "英語")
             
-        x_foreign_text = llm_client.generate_x_post(trans_title, collab_video['url'], lang['name'], is_collab=True)
+        x_foreign_text = llm_client.generate_x_post(trans_title, chosen_video['url'], lang['name'], is_collab=True)
         
         # Ensure foreign post NEVER has kana
         if has_japanese_kana(x_foreign_text):
-            x_foreign_text = llm_client.generate_x_post(trans_title, collab_video['url'], "英語", is_collab=True)
+            x_foreign_text = llm_client.generate_x_post(trans_title, chosen_video['url'], "英語", is_collab=True)
         
         # 1. Hatena Blog (12 foreign languages)
-        embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{collab_video["id"]}" frameborder="0" allowfullscreen></iframe>'
+        embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{chosen_video["id"]}" frameborder="0" allowfullscreen></iframe>'
         hatena_title = f"{trans_title} (AI Analysis) - Tori-Shira TT Lab"
-        hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{collab_video['url']}'>Watch on YouTube</a></p>"
+        hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{chosen_video['url']}'>Watch on YouTube</a></p>"
         post_to_hatena(hatena_title, hatena_content)
         
         # Launch Headless Playwright
@@ -397,8 +433,8 @@ def run_cloud_job():
                 post_to_x(p1, x_foreign_text, target_handle="@ToriShiraCh")
                 p1.close()
                 
-                # 3. YouTube Community (@Tori-ShiraTTLab)
-                yt_text = f"🎬 {trans_title}\n\n{trans_desc}\n\n{collab_video['url']}\n\n#TableTennis #ToriShiraTTLab"
+                # 3. YouTube Community (@Tori-ShiraTTLab - 12 Foreign Languages ONLY)
+                yt_text = f"🎬 {trans_title}\n\n{trans_desc}\n\n{chosen_video['url']}\n\n#TableTennis #ToriShiraTTLab"
                 p2 = context.new_page()
                 post_to_yt_community(p2, "https://www.youtube.com/@Tori-ShiraTTLab/posts", yt_text)
                 p2.close()
@@ -422,7 +458,7 @@ def run_cloud_job():
                 context.close()
                 browser.close()
                 
-        state["history"].append(collab_video['url'])
+        state["history"].append(chosen_video['url'])
         state["last_lang_index"] = lang_index + 1
         if len(state["history"]) > 50:
             state["history"] = state["history"][-50:]
