@@ -211,8 +211,8 @@ def switch_x_account(page, target_handle):
             switcher.click(force=True)
             time.sleep(3)
             
-            # Find the exact row in menu (excluding other accounts like torishirachanne when looking for torishirach)
-            rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a").all()
+            # Find the exact row in menu
+            rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a, #layers div").all()
             target_item = None
             for r in rows:
                 try:
