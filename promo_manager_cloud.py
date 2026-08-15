@@ -57,6 +57,14 @@ def save_state(state):
     except Exception as e:
         logging.error(f"Error saving state: {e}")
 
+def contains_japanese(text):
+    """Checks if text contains Japanese Hiragana, Katakana, or common Kanji."""
+    return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]', text))
+
+def has_japanese_kana(text):
+    """Checks if text contains Japanese Hiragana or Katakana."""
+    return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text))
+
 def fetch_collab_videos():
     try:
         url = "https://www.youtube.com/@Tori-ShiraTTLab/videos"
@@ -165,9 +173,24 @@ def post_to_hatena(title, content):
 def is_strict_account_match(text, target_handle):
     """Strictly checks that the handle appears as an exact handle with negative lookahead.
     Prevents @ToriShiraCh from matching @ToriShiraChanne."""
+    if not text:
+        return False
     clean = target_handle.strip().lower().replace("@", "")
     pattern = rf"@{clean}(?![a-zA-Z0-9_])"
     return bool(re.search(pattern, text.lower()))
+
+def get_current_active_handle(page):
+    """Extracts active handle directly from page DOM."""
+    try:
+        sw = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
+        if sw.count():
+            txt = sw.inner_text().strip()
+            m = re.search(r"@[A-Za-z0-9_]+", txt)
+            if m:
+                return m.group(0)
+    except Exception:
+        pass
+    return ""
 
 def switch_x_account(page, target_handle):
     """Switches X account and strictly verifies that the active account exactly matches target_handle."""
@@ -175,7 +198,7 @@ def switch_x_account(page, target_handle):
     try:
         page.set_viewport_size({"width": 1600, "height": 900})
         page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=45000)
-        time.sleep(3)
+        time.sleep(4)
         
         switcher = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
         if switcher.count():
@@ -184,16 +207,17 @@ def switch_x_account(page, target_handle):
                 print(f"PASSED: Already logged into target X account (@{clean_target}).")
                 return True
                 
-            print(f"Current active X account is NOT @{clean_target}. Switching account...")
+            print(f"Current active X account is NOT @{clean_target} (Current: {cur_text.replace(chr(10), ' ')}). Switching account...")
             switcher.click(force=True)
-            time.sleep(2)
+            time.sleep(3)
             
             # Find the exact row in menu (excluding other accounts like torishirachanne when looking for torishirach)
             rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a").all()
             target_item = None
             for r in rows:
                 try:
-                    if is_strict_account_match(r.inner_text(), target_handle):
+                    r_text = r.inner_text()
+                    if is_strict_account_match(r_text, target_handle):
                         target_item = r
                         break
                 except Exception:
@@ -206,12 +230,20 @@ def switch_x_account(page, target_handle):
                 
                 # STRICT RE-VERIFY AFTER SWITCH:
                 page.goto("https://x.com/home", wait_until="domcontentloaded")
-                time.sleep(3)
+                time.sleep(4)
                 sw_after = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
                 if sw_after.count() and is_strict_account_match(sw_after.inner_text(), target_handle):
                     print(f"🎉 Successfully switched and strictly verified active account is @{clean_target}!")
                     return True
-                    
+            else:
+                print(f"Menu item for @{clean_target} not found in switcher popup.")
+                page.keyboard.press("Escape")
+                
+        # Final fallback check
+        final_sw = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
+        if final_sw.count() and is_strict_account_match(final_sw.inner_text(), target_handle):
+            return True
+            
         print(f"⛔ [STRICT CHECK FAILED] Active account is NOT @{clean_target}. Aborting to prevent wrong-account posting.")
         return False
     except Exception as e:
@@ -220,7 +252,26 @@ def switch_x_account(page, target_handle):
 
 def post_to_x(page, text, target_handle):
     try:
-        # STRICT PROTECTION: Never post if account does not strictly match target_handle
+        # =========================================================================
+        # DEFENSE LAYER 1: STRICT CONTENT-LEVEL LANGUAGE ENFORCEMENT
+        # =========================================================================
+        clean_handle = target_handle.strip().lower()
+        if clean_handle == "@torishirachanne":
+            # @ToriShiraChanne MUST be 100% Japanese.
+            if not contains_japanese(text):
+                logging.error(f"⛔ [SECURITY REJECT] ABORTING post to {target_handle}: Text contains NO Japanese characters! Rejected text:\n{text}")
+                print(f"⛔ [SECURITY REJECT] Refusing to post to {target_handle}: Content is not in Japanese!")
+                return False
+        elif clean_handle == "@torishirach":
+            # @ToriShiraCh MUST NOT contain any Japanese Kana.
+            if has_japanese_kana(text):
+                logging.error(f"⛔ [SECURITY REJECT] ABORTING post to {target_handle}: Text contains Japanese Kana! Rejected text:\n{text}")
+                print(f"⛔ [SECURITY REJECT] Refusing to post to {target_handle}: Content contains Japanese characters!")
+                return False
+
+        # =========================================================================
+        # DEFENSE LAYER 2: STRICT ACCOUNT SWITCHING & VERIFICATION
+        # =========================================================================
         if not switch_x_account(page, target_handle):
             print(f"⛔ [STRICT ABORT] Refusing to post because active account is NOT {target_handle}. Skipping post.")
             return False
@@ -234,6 +285,15 @@ def post_to_x(page, text, target_handle):
         
         box = page.locator("div[role='dialog'] div[role='textbox'], div[role='textbox']").first
         box.wait_for(state="visible", timeout=15000)
+        
+        # =========================================================================
+        # DEFENSE LAYER 3: PRE-SUBMIT VERIFICATION (VERIFY ACTIVE ACCOUNT IN DOM)
+        # =========================================================================
+        active_handle = get_current_active_handle(page)
+        if active_handle and not is_strict_account_match(active_handle, target_handle):
+            print(f"⛔ [FINAL MOMENT ABORT] Active account in DOM ({active_handle}) does NOT match target ({target_handle})! Aborting click.")
+            return False
+            
         box.click()
         time.sleep(1)
         
@@ -293,11 +353,15 @@ def run_cloud_job():
         trans_desc = llm_client.translate_text(collab_video['description'], lang['name']) or collab_video['description']
         
         # Check no Japanese kana in foreign post
-        if any("\u3040" <= char <= "\u30ff" for char in trans_title):
+        if has_japanese_kana(trans_title) or has_japanese_kana(trans_desc):
             trans_title = llm_client.translate_title(collab_video['title'], "英語")
             trans_desc = llm_client.translate_text(collab_video['description'], "英語")
             
         x_foreign_text = llm_client.generate_x_post(trans_title, collab_video['url'], lang['name'], is_collab=True)
+        
+        # Ensure foreign post NEVER has kana
+        if has_japanese_kana(x_foreign_text):
+            x_foreign_text = llm_client.generate_x_post(trans_title, collab_video['url'], "英語", is_collab=True)
         
         # 1. Hatena Blog (12 foreign languages)
         embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{collab_video["id"]}" frameborder="0" allowfullscreen></iframe>'
