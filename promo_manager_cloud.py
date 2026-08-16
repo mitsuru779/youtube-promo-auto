@@ -41,6 +41,33 @@ LANGUAGES = [
     {"code": "vi", "name": "ベトナム語"}
 ]
 
+# Complete verified backup list of all 23 public playlists
+STATIC_PLAYLISTS = [
+    {"id": "PLAu_TXrTcoR0", "title": "卓球視覚・アイウェア・健康科学 | Visual Performance & Health Science"},
+    {"id": "PLKRY5Rjpf4xk", "title": "卓球メンタル・練習理論・上達の思考法 | Mental Training & Practice Theories"},
+    {"id": "PLen0E7freFcY", "title": "卓球バイオメカニクス・身体操作・打球解剖学 | Biomechanics & Movement in Table Tennis"},
+    {"id": "PLLVNzVicYEhI", "title": "中学校部活動 | Junior High School Table Tennis Club Guide"},
+    {"id": "PLfLqP02qloDI", "title": "チャンネルお知らせ | Channel Announcements & Updates"},
+    {"id": "PLJxx78-bWD2c", "title": "卓球台・ボール比較ガイド | Table Tennis Tables & Balls Comparison Guide"},
+    {"id": "PLAlJMCpP7EMI", "title": "卓球ニュース・最新トピック（速報・時事） | Table Tennis News & Current Topics"},
+    {"id": "PLJ-F0GSgaPjw", "title": "グリップ・サイドテープ・コーティングなど周辺用具 | Accessories Guide (Grip & Side Tapes)"},
+    {"id": "PLYLnjuOvJ61Y", "title": "用具選びの戦略：スタイル別ラケット＆ラバー構成 | Equipment Setup by Playstyle"},
+    {"id": "PLKYvoOWkke0g", "title": "卓球界の「なぜ？」を深掘り：業界・ビジネス分析 | Why? Industry & Business Analysis"},
+    {"id": "PLPSvAGol6Cpw", "title": "中学校部活動・地域移行・卓球普及の現在 | School Sports & Regional Transition"},
+    {"id": "PLcjMwmOdnrtg", "title": "AliExpress・海外通販で賢く買う | Buying Smart on AliExpress & Global Stores"},
+    {"id": "PLKVj34ZZEyPY", "title": "中国メーカー深掘り（DHS・銀河・SANWEI・LOKI等） | Chinese Brands Deep Dive"},
+    {"id": "PLe_FuyqYUYeA", "title": "ラバーメンテナンス・保護・保管の正しい知識 | Rubber Maintenance & Storage Guide"},
+    {"id": "PLfTnsjCwPWds", "title": "接着・貼り付けのプロ技術（ラバー接着剤マスター） | Pro Gluing & Assembly Techniques"},
+    {"id": "PLIsVdg_Kwbpk", "title": "「同じ」用具を探す！代替品・類似品シリーズ | Equipment Clones & Alternatives"},
+    {"id": "PLe6klWWrufQ8", "title": "特殊素材ラケット完全ガイド（カーボン・ZLC等） | Composite Blades Guide (ALC, ZLC, Carbon)"},
+    {"id": "PLd_jaNWqKvBI", "title": "ラケット木材・構造・物理の科学 | Blade Wood Science & Structural Physics"},
+    {"id": "PLY4Mm1mwEcv0", "title": "補助剤・ブースターの真実 | The Truth About Boosters & Tuning"},
+    {"id": "PLZgEXv6tniy4", "title": "粘着ラバー徹底解説（中国ラバー専門）| Sticky Rubber Deep Dive (Chinese Rubber)"},
+    {"id": "PLfmhWmQvgpqo", "title": "ラバーの科学と物理：裏ソフト・表ソフト・粒高・アンチ | Rubber Science & Physics"},
+    {"id": "PLEcIkI6D0U3U", "title": "注目選手・レジェンドプレイヤー特集 | Featured Players & Legends"},
+    {"id": "PLdZGgbtjqF9k", "title": "卓球ルール・大会・トーナメント完全ガイド | Table Tennis Rules, Tournaments & Competition Guide"}
+]
+
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -65,12 +92,54 @@ def has_japanese_kana(text):
     """Checks if text contains Japanese Hiragana or Katakana."""
     return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text))
 
+def fetch_published_playlists():
+    """Fetches all published playlists from YouTube, with static backup fallback."""
+    playlists = []
+    seen_ids = set()
+    playlists_url = "https://www.youtube.com/@ToriShiraChannel/playlists"
+    try:
+        ydl_opts = {'extract_flat': True, 'quiet': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            res = ydl.extract_info(playlists_url, download=False)
+            entries = res.get('entries', []) if res else []
+            for e in entries:
+                t = e.get('title') or ""
+                pl_id = e.get('id') or ""
+                if pl_id and t and pl_id not in seen_ids:
+                    seen_ids.add(pl_id)
+                    playlists.append({
+                        'id': pl_id,
+                        'title': t,
+                        'url': f"https://www.youtube.com/playlist?list={pl_id}",
+                        'description': f"再生リスト: {t}",
+                        'is_playlist': True
+                    })
+    except Exception as e:
+        logging.warning(f"Warning fetching playlists dynamically: {e}")
+
+    # Fallback to ensure all static playlists are included
+    for sp in STATIC_PLAYLISTS:
+        if sp['id'] not in seen_ids:
+            seen_ids.add(sp['id'])
+            playlists.append({
+                'id': sp['id'],
+                'title': sp['title'],
+                'url': f"https://www.youtube.com/playlist?list={sp['id']}",
+                'description': f"再生リスト: {sp['title']}",
+                'is_playlist': True
+            })
+
+    print(f"Total published playlists active: {len(playlists)}")
+    return playlists
+
 def fetch_multilingual_target_videos():
-    """Fetches videos from BOTH channels for multi-lingual promotion:
+    """Fetches items from BOTH channels for multi-lingual promotion:
     1. Tori-Shira TT Lab (@Tori-ShiraTTLab/videos)
     2. Tori-Shira Main Channel (@ToriShiraChannel/videos) - Excluding members-only
+    3. Featured / Target Videos
+    4. All Playlists (Bilingual titles)
     """
-    videos = []
+    items = []
     seen_ids = set()
     
     # 1. Tori-Shira TT Lab Videos
@@ -85,12 +154,13 @@ def fetch_multilingual_target_videos():
                 v_id = e.get('id') or ""
                 if v_id and t and v_id not in seen_ids:
                     seen_ids.add(v_id)
-                    videos.append({
+                    items.append({
                         'id': v_id,
                         'title': t,
                         'url': f"https://www.youtube.com/watch?v={v_id}",
                         'description': t,
-                        'source': 'TTLab'
+                        'source': 'TTLab',
+                        'is_playlist': False
                     })
     except Exception as e:
         logging.warning(f"Warning fetching TTLab videos: {e}")
@@ -109,12 +179,13 @@ def fetch_multilingual_target_videos():
                     continue
                 if v_id and t and v_id not in seen_ids:
                     seen_ids.add(v_id)
-                    videos.append({
+                    items.append({
                         'id': v_id,
                         'title': t,
                         'url': f"https://www.youtube.com/watch?v={v_id}",
                         'description': t,
-                        'source': 'Main'
+                        'source': 'Main',
+                        'is_playlist': False
                     })
     except Exception as e:
         logging.warning(f"Warning fetching Main Channel videos for multilingual target: {e}")
@@ -126,40 +197,34 @@ def fetch_multilingual_target_videos():
             'title': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)',
             'url': 'https://www.youtube.com/watch?v=_lAcFW-besQ',
             'description': '[Table Tennis] Super Cheap Membership!: Tori-Shira TT Lab (AI ANALYSIS)',
-            'source': 'Featured'
+            'source': 'Featured',
+            'is_playlist': False
         }
     ]
     for tv in target_videos:
         if tv['id'] not in seen_ids:
             seen_ids.add(tv['id'])
-            videos.append(tv)
+            items.append(tv)
 
-    print(f"Total multi-lingual candidate videos pool from BOTH channels: {len(videos)}")
-    return videos
+    # 4. Include all playlists in multilingual pool
+    playlists = fetch_published_playlists()
+    for pl in playlists:
+        if pl['url'] not in seen_ids:
+            seen_ids.add(pl['url'])
+            # Extract English part of playlist title if available
+            title_parts = pl['title'].split("|")
+            eng_title = title_parts[1].strip() if len(title_parts) > 1 else pl['title']
+            items.append({
+                'id': pl['id'],
+                'title': f"Table Tennis Playlist: {eng_title}",
+                'url': pl['url'],
+                'description': f"Official Playlist: {eng_title}",
+                'source': 'Playlist',
+                'is_playlist': True
+            })
 
-def fetch_published_playlists():
-    playlists_url = "https://www.youtube.com/@ToriShiraChannel/playlists"
-    try:
-        ydl_opts = {'extract_flat': True, 'quiet': True}
-        playlists = []
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            res = ydl.extract_info(playlists_url, download=False)
-            entries = res.get('entries', []) if res else []
-            for e in entries:
-                t = e.get('title') or ""
-                pl_id = e.get('id') or ""
-                if pl_id and t:
-                    playlists.append({
-                        'id': pl_id,
-                        'title': t,
-                        'url': f"https://www.youtube.com/playlist?list={pl_id}",
-                        'description': f"再生リスト: {t}",
-                        'is_playlist': True
-                    })
-        return playlists
-    except Exception as e:
-        logging.error(f"Error fetching playlists: {e}")
-        return []
+    print(f"Total multi-lingual candidate pool (videos + playlists) from BOTH channels: {len(items)}")
+    return items
 
 def fetch_main_items(history=[]):
     videos = []
@@ -392,31 +457,43 @@ def run_cloud_job():
     lang = LANGUAGES[lang_index]
     print(f"Current Language: {lang['name']} ({lang['code']})")
     
-    # Task 1, 2, 3: Multilingual promotion pool from BOTH channels (12 foreign languages only)
-    multilingual_videos = fetch_multilingual_target_videos()
-    if multilingual_videos:
-        non_recent = [v for v in multilingual_videos if v['url'] not in state.get("history", [])]
-        chosen_video = random.choice(non_recent if non_recent else multilingual_videos)
-        print(f"Selected video for Multilingual Promotion: {chosen_video['title']} [{chosen_video['source']}] ({chosen_video['url']})")
+    # Task 1, 2, 3: Multilingual promotion pool from BOTH channels + ALL Playlists (12 foreign languages only)
+    multilingual_items = fetch_multilingual_target_videos()
+    if multilingual_items:
+        non_recent = [v for v in multilingual_items if v['url'] not in state.get("history", [])]
+        chosen_item = random.choice(non_recent if non_recent else multilingual_items)
+        print(f"Selected item for Multilingual Promotion: {chosen_item['title']} [{chosen_item['source']}] ({chosen_item['url']})")
         
-        trans_title = llm_client.translate_title(chosen_video['title'], lang['name']) or chosen_video['title']
-        trans_desc = llm_client.translate_text(chosen_video['description'], lang['name']) or chosen_video['description']
+        is_playlist = chosen_item.get('is_playlist', False)
         
-        # Check no Japanese kana in foreign post
-        if has_japanese_kana(trans_title) or has_japanese_kana(trans_desc):
-            trans_title = llm_client.translate_title(chosen_video['title'], "英語")
-            trans_desc = llm_client.translate_text(chosen_video['description'], "英語")
+        if is_playlist:
+            raw_title = chosen_item['title'].replace("Table Tennis Playlist: ", "").strip()
+            trans_title = llm_client.translate_title(raw_title, lang['name']) or raw_title
+            trans_desc = f"Discover comprehensive table tennis tutorials, gear tests, and match strategies in this official playlist."
+            x_foreign_text = f"🎬 Table Tennis Playlist: {trans_title}\n\nCheck out the curated video collection!\n\n#TableTennis #PingPong #ToriShiraTTLab\n\n{chosen_item['url']}"
+        else:
+            trans_title = llm_client.translate_title(chosen_item['title'], lang['name']) or chosen_item['title']
+            trans_desc = llm_client.translate_text(chosen_item['description'], lang['name']) or chosen_item['description']
             
-        x_foreign_text = llm_client.generate_x_post(trans_title, chosen_video['url'], lang['name'], is_collab=True)
-        
-        # Ensure foreign post NEVER has kana
-        if has_japanese_kana(x_foreign_text):
-            x_foreign_text = llm_client.generate_x_post(trans_title, chosen_video['url'], "英語", is_collab=True)
+            # Check no Japanese kana in foreign post
+            if has_japanese_kana(trans_title) or has_japanese_kana(trans_desc):
+                trans_title = llm_client.translate_title(chosen_item['title'], "英語")
+                trans_desc = llm_client.translate_text(chosen_item['description'], "英語")
+                
+            x_foreign_text = llm_client.generate_x_post(trans_title, chosen_item['url'], lang['name'], is_collab=True)
+            
+            # Ensure foreign post NEVER has kana
+            if has_japanese_kana(x_foreign_text):
+                x_foreign_text = llm_client.generate_x_post(trans_title, chosen_item['url'], "英語", is_collab=True)
         
         # 1. Hatena Blog (12 foreign languages)
-        embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{chosen_video["id"]}" frameborder="0" allowfullscreen></iframe>'
-        hatena_title = f"{trans_title} (AI Analysis) - Tori-Shira TT Lab"
-        hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{chosen_video['url']}'>Watch on YouTube</a></p>"
+        if not is_playlist:
+            embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{chosen_item["id"]}" frameborder="0" allowfullscreen></iframe>'
+        else:
+            embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/videoseries?list={chosen_item["id"]}" frameborder="0" allowfullscreen></iframe>'
+            
+        hatena_title = f"{trans_title} - Tori-Shira TT Lab"
+        hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{chosen_item['url']}'>Watch on YouTube</a></p>"
         post_to_hatena(hatena_title, hatena_content)
         
         # Launch Headless Playwright
@@ -434,7 +511,7 @@ def run_cloud_job():
                 p1.close()
                 
                 # 3. YouTube Community (@Tori-ShiraTTLab - 12 Foreign Languages ONLY)
-                yt_text = f"🎬 {trans_title}\n\n{trans_desc}\n\n{chosen_video['url']}\n\n#TableTennis #ToriShiraTTLab"
+                yt_text = f"🎬 {trans_title}\n\n{trans_desc}\n\n{chosen_item['url']}\n\n#TableTennis #ToriShiraTTLab"
                 p2 = context.new_page()
                 post_to_yt_community(p2, "https://www.youtube.com/@Tori-ShiraTTLab/posts", yt_text)
                 p2.close()
@@ -458,7 +535,7 @@ def run_cloud_job():
                 context.close()
                 browser.close()
                 
-        state["history"].append(chosen_video['url'])
+        state["history"].append(chosen_item['url'])
         state["last_lang_index"] = lang_index + 1
         if len(state["history"]) > 50:
             state["history"] = state["history"][-50:]
