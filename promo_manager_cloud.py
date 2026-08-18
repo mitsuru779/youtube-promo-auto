@@ -211,7 +211,6 @@ def fetch_multilingual_target_videos():
     for pl in playlists:
         if pl['url'] not in seen_ids:
             seen_ids.add(pl['url'])
-            # Extract English part of playlist title if available
             title_parts = pl['title'].split("|")
             eng_title = title_parts[1].strip() if len(title_parts) > 1 else pl['title']
             items.append({
@@ -284,24 +283,26 @@ def post_to_hatena(title, content):
         logging.error(f"Hatena error: {e}")
         return False
 
-def is_strict_account_match(text, target_handle):
-    """Strictly checks that the handle appears as an exact handle with negative lookahead.
-    Prevents @ToriShiraCh from matching @ToriShiraChanne."""
-    if not text:
-        return False
-    clean = target_handle.strip().lower().replace("@", "")
-    pattern = rf"@{clean}(?![a-zA-Z0-9_])"
-    return bool(re.search(pattern, text.lower()))
-
 def get_current_active_handle(page):
-    """Extracts active handle directly from page DOM."""
+    """Extracts active handle directly from profile link href and account switcher with 100% precision."""
     try:
+        # 1. Primary Check: Profile link on left sidebar (e.g. href="/ToriShiraChanne" or href="/ToriShiraCh")
+        prof_link = page.locator("a[data-testid='AppTabBar_Profile_Link']").first
+        if prof_link.count():
+            href = prof_link.get_attribute("href") or ""
+            handle = href.strip("/").lower()
+            if handle in ["torishirachanne", "torishirach"]:
+                return f"@{handle}"
+
+        # 2. Secondary Check: Account switcher button text
         sw = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
         if sw.count():
             txt = sw.inner_text().strip()
-            m = re.search(r"@[A-Za-z0-9_]+", txt)
-            if m:
-                return m.group(0)
+            # Match @torishirachanne or @torishirach explicitly
+            if "@torishirachanne" in txt.lower():
+                return "@torishirachanne"
+            if "@torishirach" in txt.lower():
+                return "@torishirach"
     except Exception:
         pass
     return ""
@@ -309,87 +310,106 @@ def get_current_active_handle(page):
 def switch_x_account(page, target_handle):
     """Switches X account and strictly verifies that the active account exactly matches target_handle."""
     clean_target = target_handle.strip().lower().replace("@", "")
+    target_full = f"@{clean_target}"
     try:
         page.set_viewport_size({"width": 1600, "height": 900})
         page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=45000)
         time.sleep(4)
         
+        cur_handle = get_current_active_handle(page)
+        if cur_handle == target_full:
+            print(f"PASSED: Verified active X account is {target_full}.")
+            return True
+            
+        print(f"Active account is '{cur_handle}', switching to '{target_full}'...")
         switcher = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
         if switcher.count():
-            cur_text = switcher.inner_text().lower()
-            if is_strict_account_match(cur_text, target_handle):
-                print(f"PASSED: Already logged into target X account (@{clean_target}).")
-                return True
-                
-            print(f"Current active X account is NOT @{clean_target} (Current: {cur_text.replace(chr(10), ' ')}). Switching account...")
             switcher.click(force=True)
             time.sleep(3)
             
             # Find the exact row in menu
-            rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a, #layers div").all()
+            rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a").all()
             target_item = None
             for r in rows:
                 try:
-                    r_text = r.inner_text()
-                    if is_strict_account_match(r_text, target_handle):
-                        target_item = r
-                        break
+                    href = r.get_attribute("href") or ""
+                    txt = r.inner_text().strip().lower()
+                    if clean_target == "torishirach":
+                        if "/torishirachanne" in href.lower() or "@torishirachanne" in txt:
+                            continue
+                        if "/torishirach" in href.lower() or "@torishirach" in txt:
+                            target_item = r
+                            break
+                    elif clean_target == "torishirachanne":
+                        if "/torishirachanne" in href.lower() or "@torishirachanne" in txt:
+                            target_item = r
+                            break
                 except Exception:
                     pass
                     
             if target_item:
-                print(f"Clicking exact menu item for @{clean_target}...")
+                print(f"Clicking account row for {target_full}...")
                 target_item.click(force=True)
                 time.sleep(6)
                 
                 # STRICT RE-VERIFY AFTER SWITCH:
                 page.goto("https://x.com/home", wait_until="domcontentloaded")
                 time.sleep(4)
-                sw_after = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
-                if sw_after.count() and is_strict_account_match(sw_after.inner_text(), target_handle):
-                    print(f"🎉 Successfully switched and strictly verified active account is @{clean_target}!")
+                sw_after = get_current_active_handle(page)
+                if sw_after == target_full:
+                    print(f"🎉 Successfully switched and verified account {target_full}!")
                     return True
             else:
-                print(f"Menu item for @{clean_target} not found in switcher popup.")
+                print(f"Menu item for {target_full} not found in switcher popup.")
                 page.keyboard.press("Escape")
                 
-        # Final fallback check
-        final_sw = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
-        if final_sw.count() and is_strict_account_match(final_sw.inner_text(), target_handle):
+        # Final check
+        if get_current_active_handle(page) == target_full:
             return True
             
-        print(f"⛔ [STRICT CHECK FAILED] Active account is NOT @{clean_target}. Aborting to prevent wrong-account posting.")
+        print(f"⛔ [STRICT CHECK FAILED] Could not switch to {target_full}. Current active: '{get_current_active_handle(page)}'.")
         return False
     except Exception as e:
         logging.error(f"X switch error: {e}")
         return False
 
 def post_to_x(page, text, target_handle):
+    clean_target = target_handle.strip().lower().replace("@", "")
+    target_full = f"@{clean_target}"
     try:
         # =========================================================================
         # DEFENSE LAYER 1: STRICT CONTENT-LEVEL LANGUAGE ENFORCEMENT
         # =========================================================================
-        clean_handle = target_handle.strip().lower()
-        if clean_handle == "@torishirachanne":
+        if target_full == "@torishirachanne":
             # @ToriShiraChanne MUST be 100% Japanese.
             if not contains_japanese(text):
-                logging.error(f"⛔ [SECURITY REJECT] ABORTING post to {target_handle}: Text contains NO Japanese characters! Rejected text:\n{text}")
-                print(f"⛔ [SECURITY REJECT] Refusing to post to {target_handle}: Content is not in Japanese!")
+                logging.critical(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Text has NO Japanese characters!\nBlocked text:\n{text}")
+                print(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Content is not Japanese!")
                 return False
-        elif clean_handle == "@torishirach":
+        elif target_full == "@torishirach":
             # @ToriShiraCh MUST NOT contain any Japanese Kana.
             if has_japanese_kana(text):
-                logging.error(f"⛔ [SECURITY REJECT] ABORTING post to {target_handle}: Text contains Japanese Kana! Rejected text:\n{text}")
-                print(f"⛔ [SECURITY REJECT] Refusing to post to {target_handle}: Content contains Japanese characters!")
+                logging.critical(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Text contains Japanese Kana!\nBlocked text:\n{text}")
+                print(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Content contains Japanese characters!")
                 return False
 
         # =========================================================================
         # DEFENSE LAYER 2: STRICT ACCOUNT SWITCHING & VERIFICATION
         # =========================================================================
-        if not switch_x_account(page, target_handle):
-            print(f"⛔ [STRICT ABORT] Refusing to post because active account is NOT {target_handle}. Skipping post.")
+        if not switch_x_account(page, target_full):
+            logging.warning(f"⛔ [STRICT ABORT] Active account is NOT {target_full}. Skipping post.")
+            print(f"⛔ [STRICT ABORT] Refusing to post because active account is NOT {target_full}. Skipping post.")
             return False
             
+        # =========================================================================
+        # DEFENSE LAYER 3: PRE-SUBMIT VERIFICATION (VERIFY ACTIVE ACCOUNT IN DOM)
+        # =========================================================================
+        active_handle = get_current_active_handle(page)
+        if active_handle != target_full:
+            logging.critical(f"⛔ [PRE-CLICK BLOCK] Active account '{active_handle}' != target '{target_full}'. Aborting!")
+            print(f"⛔ [PRE-CLICK BLOCK] Active account '{active_handle}' != target '{target_full}'. Aborting!")
+            return False
+
         compose_btn = page.locator("[data-testid='SideNav_NewTweet_Button'], a[href='/compose/post']").first
         if compose_btn.count():
             compose_btn.click()
@@ -400,14 +420,6 @@ def post_to_x(page, text, target_handle):
         box = page.locator("div[role='dialog'] div[role='textbox'], div[role='textbox']").first
         box.wait_for(state="visible", timeout=15000)
         
-        # =========================================================================
-        # DEFENSE LAYER 3: PRE-SUBMIT VERIFICATION (VERIFY ACTIVE ACCOUNT IN DOM)
-        # =========================================================================
-        active_handle = get_current_active_handle(page)
-        if active_handle and not is_strict_account_match(active_handle, target_handle):
-            print(f"⛔ [FINAL MOMENT ABORT] Active account in DOM ({active_handle}) does NOT match target ({target_handle})! Aborting click.")
-            return False
-            
         box.click()
         time.sleep(1)
         
@@ -423,7 +435,7 @@ def post_to_x(page, text, target_handle):
             if (btn) btn.click();
         }""")
         time.sleep(5)
-        print(f"Successfully posted to X [{target_handle}]!")
+        print(f"Successfully posted to X [{target_full}]!")
         return True
     except Exception as e:
         logging.error(f"X post error: {e}")

@@ -5,6 +5,7 @@ import random
 import logging
 import urllib.parse
 import time
+import re
 from datetime import datetime
 import yt_dlp
 import requests
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
 import llm_client
+
 
 # Fix console encoding for Windows
 if sys.platform == "win32":
@@ -562,13 +564,15 @@ def switch_x_account(page, target_handle):
             time.sleep(5)
             
             # Re-verify account after switch
-            is_matched, _ = verify_current_x_account(page, target_handle)
+            time.sleep(3)
+            is_matched, current_handle = verify_current_x_account(page, target_handle)
             if is_matched:
                 print(f"Successfully switched to target X account (@{clean_target})!")
                 return True
             else:
-                print(f"Account switch clicked, verifying post state for @{clean_target}...")
-                return True
+                print(f"⛔ [ACCOUNT SWITCH FAILED] Expected @{clean_target} but active account is @{current_handle}. Aborting switch.")
+                logging.error(f"Failed to switch X account to {target_handle}. Active account remains: {current_handle}")
+                return False
         else:
             print(f"Menu item for @{clean_target} not found in account menu.")
             page.keyboard.press("Escape")
@@ -576,6 +580,8 @@ def switch_x_account(page, target_handle):
     except Exception as e:
         logging.error(f"Failed to switch X account to {target_handle}: {e}")
         print(f"X Account switch error: {e}")
+        return False
+
         return False
 
 def contains_japanese(text):
@@ -587,7 +593,7 @@ def has_japanese_kana(text):
     return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text))
 
 def post_to_x_via_playwright(page, text, target_account_handle="@ToriShiraCh"):
-    """Automates X (Twitter) posting with strict 3-layer language and account guard."""
+    """Automates X (Twitter) posting with strict 3-layer language, account guard, and placeholder sanitization."""
     try:
         clean_handle = target_account_handle.strip().lower()
         if clean_handle == "@torishirachanne":
@@ -599,14 +605,40 @@ def post_to_x_via_playwright(page, text, target_account_handle="@ToriShiraCh"):
                 print(f"⛔ [SECURITY REJECT] Refusing to post to {target_account_handle}: Content contains Japanese characters!")
                 return False
 
+        # Guard against raw [Link] / [URL] template placeholders
+        for ph in ["[Link]", "[link]", "[URL]", "[url]", "[Video Link]", "[Enlace]", "[Lien]"]:
+            if ph in text:
+                text = text.replace(ph, "").strip()
+        text = re.sub(r'(Mira aquí|Watch here|Hier ansehen|Regardez ici|Veja aqui|Смотрите здесь|Дивіться тут|यहाँ देखें|ดูที่นี่|Xem tại đây)[:：\s]*\n', '\n', text, flags=re.IGNORECASE)
+
+        # Enforce that text must have a valid URL
+        if "http://" not in text and "https://" not in text:
+            print(f"⛔ [SECURITY REJECT] Refusing to post to {target_account_handle}: Post text is missing a YouTube video URL!")
+            logging.error(f"Aborted X post: Post text missing URL: {text}")
+            return False
+
         switched = switch_x_account(page, target_account_handle)
+
         if not switched:
             print(f"[STRICT CHECK ABORT] Aborting X post because active account is not {target_account_handle}.")
             logging.warning(f"Aborted X post: Active account did not match {target_account_handle}.")
             return False
+
+        # Double check actual active account on page before typing/clicking post
+        is_matched, current_active = verify_current_x_account(page, target_account_handle)
+        if not is_matched:
+            print(f"⛔ [FINAL SAFETY ABORT] Target account was {target_account_handle}, but active page is @{current_active}. Refusing to post!")
+            logging.error(f"Final safety abort: Expected {target_account_handle}, found @{current_active}")
+            return False
             
-        print(f"Opening compose modal on X for account {target_account_handle}...")
+        if current_active.lower() in ["torishirachanne", "torishirachannel"]:
+            if not contains_japanese(text):
+                print(f"⛔ [FINAL SAFETY ABORT] Current active account is Japanese main (@{current_active}) and text is non-Japanese! Aborting post!")
+                return False
+
+        print(f"Opening compose modal on X for account {target_account_handle} (Active: @{current_active})...")
         page.set_viewport_size({"width": 1600, "height": 900})
+
         
         # Click compose button on sidebar
         compose_btn = page.locator("[data-testid='SideNav_NewTweet_Button'], a[href='/compose/post']").first
