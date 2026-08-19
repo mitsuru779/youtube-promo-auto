@@ -157,6 +157,7 @@ def generate_x_post(translated_title, video_url, target_lang_name, is_collab=Fal
     """
     Generates a social post for X (Twitter) in the target language.
     Strictly keeps the total text under 230 characters (including URL) to avoid X limit issues.
+    Guarantees no raw placeholders like [Link] and ensures video_url is embedded.
     """
     collab_instruction = "Mention that this is a special AI dubbed video." if is_collab else ""
     
@@ -166,9 +167,10 @@ def generate_x_post(translated_title, video_url, target_lang_name, is_collab=Fal
         f"{collab_instruction}\n"
         "Requirements:\n"
         f"1. You MUST write ENTIRELY in {target_lang_name}.\n"
-        "2. The text MUST be VERY SHORT (MAX 70 words or 90 characters).\n"
+        "2. The text MUST be VERY SHORT (MAX 60 words or 80 characters).\n"
         "3. Include 2 relevant hashtags like #TableTennis #ToriShira.\n"
-        "4. Output ONLY the tweet text, no quotation marks or commentary."
+        "4. DO NOT write [Link], [URL], or any brackets placeholder. The URL will be added automatically.\n"
+        "5. Output ONLY the tweet text, no quotation marks or commentary."
     )
     
     result = query_gemini(prompt, system_instruction=f"You are a Twitter marketer. You write extremely concise tweets strictly under character limits in {target_lang_name} only.")
@@ -177,17 +179,27 @@ def generate_x_post(translated_title, video_url, target_lang_name, is_collab=Fal
         if result.startswith('"') and result.endswith('"'):
             result = result[1:-1].strip()
             
+        # Clean any accidental placeholders emitted by LLM
+        for ph in ["[Link]", "[link]", "[URL]", "[url]", "[Video Link]", "[Enlace]", "[Lien]", "[Video]", "[video]"]:
+            if ph in result:
+                result = result.replace(ph, "").strip()
+        
+        # Remove trailing colon or leftover whitespace from "Watch here:" / "Mira aquí:" if URL was stripped
+        import re
+        result = re.sub(r'(Mira aquí|Watch here|Hier ansehen|Regardez ici|Veja aqui|Смотрите здесь|Дивіться тут|यहाँ देखें|ดูที่นี่|Xem tại đây)[:：\s]*$', '', result, flags=re.IGNORECASE).strip()
+            
         # Strict Japanese length limit: Total Japanese tweet text + URL must be under 120 chars
         if target_lang_name in ["Japanese", "日本語"]:
-            if len(result) > 90:
-                result = result[:85] + "..."
+            if len(result) > 85:
+                result = result[:80] + "..."
             post = f"{result}\n\n{video_url}"
         else:
-            post = f"{result}\n\n{video_url}"
-            if len(post) > 230:
-                allowed_text_len = 230 - len(video_url) - 3
+            # Check length with video URL
+            if len(result) + len(video_url) + 2 > 230:
+                allowed_text_len = 230 - len(video_url) - 5
                 result = result[:allowed_text_len].rsplit(' ', 1)[0] + "..."
-                post = f"{result}\n\n{video_url}"
+            post = f"{result}\n\n{video_url}"
+            
         return post
     
     # Fallback template (guaranteed short)
@@ -195,3 +207,4 @@ def generate_x_post(translated_title, video_url, target_lang_name, is_collab=Fal
         return f"🏓 {translated_title}\n\n{video_url}"
     else:
         return f"🎬 【卓球】{translated_title}\n\n{video_url}"
+

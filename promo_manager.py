@@ -47,8 +47,10 @@ LANGUAGES = [
     {"code": "uk", "name": "ウクライナ語"},
     {"code": "hi", "name": "ヒンディー語"},
     {"code": "th", "name": "タイ語"},
-    {"code": "vi", "name": "ベトナム語"}
+    {"code": "vi", "name": "ベトナム語"},
+    {"code": "ko", "name": "韓国語"}
 ]
+
 
 # --- State Management ---
 def load_state():
