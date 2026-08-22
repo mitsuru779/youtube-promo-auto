@@ -1,9 +1,12 @@
 name: Automated Multi-Language Dubbing (12 Languages)
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    # Runs automatically every 3 hours
-    - cron: '0 */3 * * *'
+    # Runs automatically every 2 hours
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       batch_size:
