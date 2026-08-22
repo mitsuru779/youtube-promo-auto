@@ -896,18 +896,7 @@
     "vi": false
   },
   "l4SpCucfL1A": {
-    "en": false,
-    "zh-CN": false,
-    "de": false,
-    "fr": false,
-    "pt": false,
-    "es": false,
-    "sv": false,
-    "ru": false,
-    "uk": false,
-    "hi": false,
-    "th": false,
-    "vi": false
+    "en": true
   },
   "QQPBWe8mIM4": {
     "en": false,
@@ -1272,5 +1261,51 @@
     "hi": false,
     "th": false,
     "vi": false
+  },
+  "8l_F_Gzv0_w": {
+    "en": true
+  },
+  "ZXNeIuXXVE8": {
+    "en": true
+  },
+  "IdcLzMwJox8": {
+    "en": true
+  },
+  "6-u9g9YJD_U": {
+    "en": true,
+    "note": "auto-dubbing in progress, skipped"
+  },
+  "MaivFCE3HLQ": {
+    "en": true
+  },
+  "Ki351hFxFs8": {
+    "en": true
+  },
+  "mVSrDU9cZF4": {
+    "en": true
+  },
+  "z_axMzovkAg": {
+    "en": true
+  },
+  "ZxgOrlEYDHY": {
+    "en": true
+  },
+  "2GnXpo2BCWk": {
+    "en": true
+  },
+  "Ra_s3exFLTE": {
+    "en": true
+  },
+  "YXYPUfJ6evE": {
+    "en": true
+  },
+  "qOgUYQPPto0": {
+    "en": true
+  },
+  "IC5CAjcnC68": {
+    "en": true
+  },
+  "BtaGPqcd_UI": {
+    "en": true
   }
 }
