@@ -93,6 +93,21 @@ def has_japanese_kana(text):
     """Checks if text contains Japanese Hiragana or Katakana."""
     return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text))
 
+def fetch_single_video_details(url):
+    """Fetches real video description and metadata for high factual consistency."""
+    try:
+        ydl_opts = {'skip_download': True, 'quiet': True, 'no_warnings': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info:
+                raw_desc = info.get('description', '') or ""
+                lines = [l.strip() for l in raw_desc.split('\n') if l.strip() and not l.strip().startswith('http') and not l.strip()[:2].isdigit()]
+                clean_desc = "\n".join(lines[:6])
+                return clean_desc
+    except Exception as e:
+        logging.warning(f"Could not fetch full details for {url}: {e}")
+    return ""
+
 def fetch_published_playlists():
     """Fetches all published playlists from YouTube, with static backup fallback."""
     playlists = []
@@ -287,7 +302,6 @@ def post_to_hatena(title, content):
 def get_current_active_handle(page):
     """Extracts active handle directly from profile link href and account switcher with 100% precision."""
     try:
-        # 1. Primary Check: Profile link on left sidebar (e.g. href="/ToriShiraChanne" or href="/ToriShiraCh")
         prof_link = page.locator("a[data-testid='AppTabBar_Profile_Link']").first
         if prof_link.count():
             href = prof_link.get_attribute("href") or ""
@@ -295,11 +309,9 @@ def get_current_active_handle(page):
             if handle in ["torishirachanne", "torishirach"]:
                 return f"@{handle}"
 
-        # 2. Secondary Check: Account switcher button text
         sw = page.locator("[data-testid='SideNav_AccountSwitcher_Button']").first
         if sw.count():
             txt = sw.inner_text().strip()
-            # Match @torishirachanne or @torishirach explicitly
             if "@torishirachanne" in txt.lower():
                 return "@torishirachanne"
             if "@torishirach" in txt.lower():
@@ -328,7 +340,6 @@ def switch_x_account(page, target_handle):
             switcher.click(force=True)
             time.sleep(3)
             
-            # Find the exact row in menu
             rows = page.locator("#layers [data-testid='AccountSwitcher_Account_Row'], #layers div[role='menuitem'], #layers a").all()
             target_item = None
             for r in rows:
@@ -353,7 +364,6 @@ def switch_x_account(page, target_handle):
                 target_item.click(force=True)
                 time.sleep(6)
                 
-                # STRICT RE-VERIFY AFTER SWITCH:
                 page.goto("https://x.com/home", wait_until="domcontentloaded")
                 time.sleep(4)
                 sw_after = get_current_active_handle(page)
@@ -364,7 +374,6 @@ def switch_x_account(page, target_handle):
                 print(f"Menu item for {target_full} not found in switcher popup.")
                 page.keyboard.press("Escape")
                 
-        # Final check
         if get_current_active_handle(page) == target_full:
             return True
             
@@ -382,13 +391,11 @@ def post_to_x(page, text, target_handle):
         # DEFENSE LAYER 1: STRICT CONTENT-LEVEL LANGUAGE ENFORCEMENT
         # =========================================================================
         if target_full == "@torishirachanne":
-            # @ToriShiraChanne MUST be 100% Japanese.
             if not contains_japanese(text):
                 logging.critical(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Text has NO Japanese characters!\nBlocked text:\n{text}")
                 print(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Content is not Japanese!")
                 return False
         elif target_full == "@torishirach":
-            # @ToriShiraCh MUST NOT contain any Japanese Kana.
             if has_japanese_kana(text):
                 logging.critical(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Text contains Japanese Kana!\nBlocked text:\n{text}")
                 print(f"⛔ [CRITICAL CONTENT BLOCK] Refusing post to {target_full}: Content contains Japanese characters!")
@@ -470,7 +477,6 @@ def run_cloud_job():
     lang = LANGUAGES[lang_index]
     print(f"Current Language: {lang['name']} ({lang['code']})")
     
-    # Task 1, 2, 3: Multilingual promotion pool from BOTH channels + ALL Playlists (12 foreign languages only)
     multilingual_items = fetch_multilingual_target_videos()
     if multilingual_items:
         non_recent = [v for v in multilingual_items if v['url'] not in state.get("history", [])]
@@ -479,34 +485,52 @@ def run_cloud_job():
         
         is_playlist = chosen_item.get('is_playlist', False)
         
+        # 🎯 Fetch rich video description to ensure 100% factual accuracy
+        real_desc = ""
+        if not is_playlist:
+            real_desc = fetch_single_video_details(chosen_item['url'])
+            if not real_desc:
+                real_desc = chosen_item.get('description', '')
+        
         if is_playlist:
             raw_title = chosen_item['title'].replace("Table Tennis Playlist: ", "").strip()
             trans_title = llm_client.translate_title(raw_title, lang['name']) or raw_title
             trans_desc = f"Discover comprehensive table tennis tutorials, gear tests, and match strategies in this official playlist."
             x_foreign_text = f"🎬 Table Tennis Playlist: {trans_title}\n\nCheck out the curated video collection!\n\n#TableTennis #PingPong #ToriShiraTTLab\n\n{chosen_item['url']}"
+            rich_content = trans_desc
         else:
             trans_title = llm_client.translate_title(chosen_item['title'], lang['name']) or chosen_item['title']
-            trans_desc = llm_client.translate_text(chosen_item['description'], lang['name']) or chosen_item['description']
             
-            # Check no Japanese kana in foreign post
-            if has_japanese_kana(trans_title) or has_japanese_kana(trans_desc):
-                trans_title = llm_client.translate_title(chosen_item['title'], "英語")
-                trans_desc = llm_client.translate_text(chosen_item['description'], "英語")
-                
-            x_foreign_text = llm_client.generate_x_post(trans_title, chosen_item['url'], lang['name'], is_collab=True)
+            # Generate accurate, fact-based tweet strictly matching the actual video content
+            x_foreign_text = llm_client.generate_x_post(
+                trans_title,
+                chosen_item['url'],
+                lang['name'],
+                video_description=real_desc,
+                is_collab=True
+            )
             
-            # Ensure foreign post NEVER has kana
+            # Fallback if kana accidentally leaks
             if has_japanese_kana(x_foreign_text):
-                x_foreign_text = llm_client.generate_x_post(trans_title, chosen_item['url'], "英語", is_collab=True)
+                x_foreign_text = llm_client.generate_x_post(
+                    trans_title,
+                    chosen_item['url'],
+                    "英語",
+                    video_description=real_desc,
+                    is_collab=True
+                )
+                
+            # Generate rich informative summary for Blog and Community
+            rich_content = llm_client.generate_detailed_summary(chosen_item['title'], real_desc, lang['name'])
         
-        # 1. Hatena Blog (12 foreign languages)
+        # 1. Hatena Blog (13 foreign languages with accurate rich content)
         if not is_playlist:
             embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{chosen_item["id"]}" frameborder="0" allowfullscreen></iframe>'
         else:
             embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/videoseries?list={chosen_item["id"]}" frameborder="0" allowfullscreen></iframe>'
             
         hatena_title = f"{trans_title} - Tori-Shira TT Lab"
-        hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{trans_desc}</p><p><a href='{chosen_item['url']}'>Watch on YouTube</a></p>"
+        hatena_content = f"<p><b>Tori-Shira TT Lab</b></p><h3>{trans_title}</h3>{embed_html}<p>{rich_content.replace(chr(10), '<br>')}</p><p><a href='{chosen_item['url']}'>Watch on YouTube</a></p>"
         post_to_hatena(hatena_title, hatena_content)
         
         # Launch Headless Playwright
@@ -518,18 +542,19 @@ def run_cloud_job():
                     browser = p.chromium.launch(headless=True, channel="chrome", args=["--no-sandbox"])
                 context = browser.new_context(storage_state=AUTH_FILE)
                 
-                # 2. X (@ToriShiraCh - 12 Foreign Languages ONLY, STRICT ABORT IF NOT @ToriShiraCh)
+                # 2. X (@ToriShiraCh - 13 Foreign Languages ONLY)
                 p1 = context.new_page()
                 post_to_x(p1, x_foreign_text, target_handle="@ToriShiraCh")
                 p1.close()
                 
-                # 3. YouTube Community (@Tori-ShiraTTLab - 12 Foreign Languages ONLY)
-                yt_text = f"🎬 {trans_title}\n\n{trans_desc}\n\n{chosen_item['url']}\n\n#TableTennis #ToriShiraTTLab"
+                # 3. YouTube Community (@Tori-ShiraTTLab - 13 Foreign Languages ONLY)
+                comm_summary = rich_content[:200] if len(rich_content) > 200 else rich_content
+                yt_text = f"🎬 {trans_title}\n\n{comm_summary}\n\n{chosen_item['url']}\n\n#TableTennis #ToriShiraTTLab"
                 p2 = context.new_page()
                 post_to_yt_community(p2, "https://www.youtube.com/@Tori-ShiraTTLab/posts", yt_text)
                 p2.close()
                 
-                # 4. Japanese Main Video/Playlist (@ToriShiraChanne - Japanese ONLY, STRICT ABORT IF NOT @ToriShiraChanne)
+                # 4. Japanese Main Video/Playlist (@ToriShiraChanne - Japanese ONLY, with accurate factual description)
                 main_item = fetch_main_items(history=state.get("history", []))
                 if main_item:
                     is_pl = main_item.get('is_playlist', False)
@@ -537,7 +562,14 @@ def run_cloud_job():
                         clean_title = main_item['title'].split("|")[0].strip()
                         x_ja_text = f"🎬 【おすすめ再生リスト】\n{clean_title}\n\n関連動画をまとめてチェック！ぜひご覧ください。\n\n#卓球 #再生リスト\n\n{main_item['url']}"
                     else:
-                        x_ja_text = llm_client.generate_x_post(main_item['title'], main_item['url'], "Japanese", is_collab=False)
+                        main_desc = fetch_single_video_details(main_item['url'])
+                        x_ja_text = llm_client.generate_x_post(
+                            main_item['title'],
+                            main_item['url'],
+                            "Japanese",
+                            video_description=main_desc,
+                            is_collab=False
+                        )
                         
                     p3 = context.new_page()
                     post_to_x(p3, x_ja_text, target_handle="@ToriShiraChanne")
