@@ -93,8 +93,45 @@ def has_japanese_kana(text):
     """Checks if text contains Japanese Hiragana or Katakana."""
     return bool(re.search(r'[\u3040-\u309F\u30A0-\u30FF]', text))
 
+CHANNEL_FEED_URLS = [
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCj5S22SvJDsZcTGKQc_220A", # Main Channel
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCV3w_3uV8fXCRTOU-rFHTmw"  # TTLab Channel
+]
+
+_rss_cache = {}
+
 def fetch_single_video_details(url):
-    """Fetches real video description and metadata for high factual consistency."""
+    """Fetches real video description and metadata using RSS first (100% bot-proof), then yt_dlp fallback."""
+    v_id = url.split("v=")[-1].split("&")[0] if "v=" in url else ""
+    
+    # 1. First Priority: Check RSS cache or query feeds
+    if v_id:
+        if v_id in _rss_cache:
+            return _rss_cache[v_id]
+        
+        import urllib.request
+        import xml.etree.ElementTree as ET
+        for feed_url in CHANNEL_FEED_URLS:
+            try:
+                req = urllib.request.Request(feed_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    xml_data = resp.read().decode('utf-8')
+                    root = ET.fromstring(xml_data)
+                    ns = {'atom': 'http://www.w3.org/2005/Atom', 'media': 'http://search.yahoo.com/mrss/'}
+                    for e in root.findall('atom:entry', ns):
+                        entry_id_tag = e.find('atom:id', ns)
+                        entry_id = entry_id_tag.text.split(":")[-1] if entry_id_tag is not None else ""
+                        group = e.find('media:group', ns)
+                        desc = group.find('media:description', ns).text if group is not None else ""
+                        if entry_id and desc:
+                            lines = [l.strip() for l in desc.split('\n') if l.strip() and not l.strip().startswith('http') and not l.strip()[:2].isdigit()]
+                            _rss_cache[entry_id] = "\n".join(lines[:6])
+                if v_id in _rss_cache:
+                    return _rss_cache[v_id]
+            except Exception as e:
+                pass
+
+    # 2. Second Priority: Direct yt_dlp extraction
     try:
         ydl_opts = {'skip_download': True, 'quiet': True, 'no_warnings': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -103,9 +140,11 @@ def fetch_single_video_details(url):
                 raw_desc = info.get('description', '') or ""
                 lines = [l.strip() for l in raw_desc.split('\n') if l.strip() and not l.strip().startswith('http') and not l.strip()[:2].isdigit()]
                 clean_desc = "\n".join(lines[:6])
-                return clean_desc
+                if clean_desc:
+                    return clean_desc
     except Exception as e:
-        logging.warning(f"Could not fetch full details for {url}: {e}")
+        logging.warning(f"Could not fetch full details for {url} via yt_dlp: {e}")
+        
     return ""
 
 def fetch_published_playlists():
