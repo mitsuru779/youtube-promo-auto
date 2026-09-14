@@ -563,7 +563,10 @@ def run_cloud_job():
             # Generate rich informative summary for Blog and Community
             rich_content = llm_client.generate_detailed_summary(chosen_item['title'], real_desc, lang['name'])
         
-        # 1. Hatena Blog (13 foreign languages with accurate rich content)
+        if not rich_content:
+            rich_content = trans_title or chosen_item['title']
+
+        # 1. Hatena Blog (14 foreign languages with accurate rich content)
         if not is_playlist:
             embed_html = f'<iframe width="560" height="315" src="https://www.youtube.com/embed/{chosen_item["id"]}" frameborder="0" allowfullscreen></iframe>'
         else:
@@ -582,7 +585,7 @@ def run_cloud_job():
                     browser = p.chromium.launch(headless=True, channel="chrome", args=["--no-sandbox"])
                 context = browser.new_context(storage_state=AUTH_FILE)
                 
-                # 2. X (@ToriShiraCh - 13 Foreign Languages ONLY)
+                # 2. X (@ToriShiraCh - 14 Foreign Languages ONLY)
                 p1 = context.new_page()
                 post_to_x(p1, x_foreign_text, target_handle="@ToriShiraCh")
                 p1.close()
