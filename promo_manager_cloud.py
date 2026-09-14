@@ -25,11 +25,12 @@ load_dotenv()
 STATE_FILE = "promo_state.json"
 AUTH_FILE = os.getenv("AUTH_STATE_FILE", "auth_state.json")
 
-# 13 Foreign Languages strictly for @ToriShiraCh (NO Japanese)
+# 14 Foreign Languages strictly for @ToriShiraCh (NO Japanese)
 LANGUAGES = [
     {"code": "en", "name": "英語"},
     {"code": "zh-CN", "name": "中国語"},
     {"code": "ko", "name": "韓国語"},
+    {"code": "ar", "name": "アラビア語"},
     {"code": "de", "name": "ドイツ語"},
     {"code": "fr", "name": "フランス語"},
     {"code": "pt", "name": "ポルトガル語"},

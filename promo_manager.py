@@ -38,6 +38,8 @@ STATE_FILE = "promo_state.json"
 LANGUAGES = [
     {"code": "en", "name": "英語"},
     {"code": "zh-CN", "name": "中国語"},
+    {"code": "ko", "name": "韓国語"},
+    {"code": "ar", "name": "アラビア語"},
     {"code": "de", "name": "ドイツ語"},
     {"code": "fr", "name": "フランス語"},
     {"code": "pt", "name": "ポルトガル語"},
@@ -47,8 +49,7 @@ LANGUAGES = [
     {"code": "uk", "name": "ウクライナ語"},
     {"code": "hi", "name": "ヒンディー語"},
     {"code": "th", "name": "タイ語"},
-    {"code": "vi", "name": "ベトナム語"},
-    {"code": "ko", "name": "韓国語"}
+    {"code": "vi", "name": "ベトナム語"}
 ]
 
 

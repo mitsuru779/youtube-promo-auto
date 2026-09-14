@@ -24,10 +24,10 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install System Dependencies & Japanese Fonts
+      - name: Install System Dependencies & Fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk fonts-ipafont-gothic
+          sudo apt-get install -y fonts-noto-cjk fonts-ipafont-gothic fonts-kacst
 
       - name: Install Python Dependencies & Browsers
         run: |
